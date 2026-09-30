@@ -113,7 +113,9 @@
     examplesDialog:$('examples-dialog'), exampleList:$('example-list'), tutorialDialog:$('tutorial-dialog'), toast:$('toast'),
     challengeCard:$('challenge-card'), challengeProgress:$('challenge-progress'), challengeDifficulty:$('challenge-difficulty'),
     challengeNumber:$('challenge-number'), challengeTitle:$('challenge-title'), challengeDescription:$('challenge-description'),
-    challengeHint:$('challenge-hint'), challengeStatus:$('challenge-status')
+    challengeHint:$('challenge-hint'), challengeStatus:$('challenge-status'),
+    challengeTracks:$('challenge-tracks'), challengeTrackName:$('challenge-track-name'),
+    visualizerSummary:$('visualizer-summary'), querySteps:$('query-steps')
   };
 
   const save = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -357,7 +359,7 @@
   const executeSelect = sql => {
     const clean = sql.trim().replace(/;\s*$/,'').replace(/\s+/g,' ');
     const head = clean.match(/^SELECT\s+(.+?)\s+FROM\s+([A-Za-z_][\w]*)(.*)$/i);
-    if (!head) throw new Error('SQL Lab currently runs SELECT queries. Try SELECT * FROM customers;');
+    if (!head) throw new Error('That SELECT query could not be parsed. Try SELECT * FROM customers;');
 
     const selectPart = head[1].trim();
     const baseTable = head[2];
@@ -419,10 +421,113 @@
     };
   };
 
+  const mutationPreview = (tableName, affectedRows, message) => {
+    const table=state.tables[tableName];
+    const rows=table.rows.slice(0,500).map((row,index) => {
+      const copy={...row};
+      Object.defineProperty(copy,'__sourceIndex',{value:index,enumerable:false});
+      return copy;
+    });
+    state.activeTable=tableName;
+    return {
+      mutation:true,
+      affectedRows,
+      message,
+      sourceTable:tableName,
+      editable:true,
+      columns:table.columns.map(col => col.name),
+      rows
+    };
+  };
+
+  const valueForColumn = (table, columnName, rawValue) => {
+    const column=table.columns.find(col => col.name === columnName);
+    if (!column) throw new Error('Column "' + columnName + '" does not exist in this table.');
+    const parsed=stripQuotes(rawValue);
+    if (parsed == null) return null;
+    if (column.type === 'number') {
+      const value=Number(parsed);
+      if (!Number.isFinite(value)) throw new Error('Column "' + columnName + '" expects a number.');
+      return value;
+    }
+    if (column.type === 'boolean') {
+      if (parsed === true || parsed === false) return parsed;
+      if (String(parsed).toLowerCase() === 'true') return true;
+      if (String(parsed).toLowerCase() === 'false') return false;
+      throw new Error('Column "' + columnName + '" expects true or false.');
+    }
+    return String(parsed);
+  };
+
+  const executeInsert = sql => {
+    const clean=sql.trim().replace(/;\s*$/,'').replace(/\s+/g,' ');
+    const match=clean.match(/^INSERT\s+INTO\s+([A-Za-z_][\w]*)\s*\(([^)]+)\)\s+VALUES\s*\((.*)\)$/i);
+    if (!match) throw new Error('INSERT format: INSERT INTO table (column1, column2) VALUES (value1, value2);');
+    const tableName=match[1], table=state.tables[tableName];
+    if (!table) throw new Error('Table "' + tableName + '" does not exist.');
+    const columns=splitCSV(match[2]).map(value => value.trim());
+    const values=splitCSV(match[3]);
+    if (columns.length !== values.length) throw new Error('INSERT needs the same number of columns and values.');
+    if (new Set(columns).size !== columns.length) throw new Error('INSERT column names must be unique.');
+    const row=Object.fromEntries(table.columns.map(col => [col.name,null]));
+    columns.forEach((column,index) => { row[column]=valueForColumn(table,column,values[index]); });
+    table.rows.push(row);
+    return mutationPreview(tableName,1,'Inserted 1 row into ' + tableName + '.');
+  };
+
+  const executeUpdate = sql => {
+    const clean=sql.trim().replace(/;\s*$/,'').replace(/\s+/g,' ');
+    const match=clean.match(/^UPDATE\s+([A-Za-z_][\w]*)\s+SET\s+(.+?)(?:\s+WHERE\s+(.+))?$/i);
+    if (!match) throw new Error("UPDATE format: UPDATE table SET column = value WHERE id = 1;");
+    const tableName=match[1], table=state.tables[tableName];
+    if (!table) throw new Error('Table "' + tableName + '" does not exist.');
+    const assignments=splitCSV(match[2]).map(item => {
+      const assignment=item.match(/^([A-Za-z_][\w]*)\s*=\s*(.+)$/);
+      if (!assignment) throw new Error('Invalid SET assignment: ' + item);
+      return {column:assignment[1],value:valueForColumn(table,assignment[1],assignment[2])};
+    });
+    const candidates=match[3] ? applyWhere(table.rows,match[3].trim()) : table.rows.slice();
+    const targets=new Set(candidates);
+    let affected=0;
+    table.rows.forEach(row => {
+      if (!targets.has(row)) return;
+      assignments.forEach(item => { row[item.column]=item.value; });
+      affected++;
+    });
+    return mutationPreview(tableName,affected,'Updated ' + affected + ' row' + (affected===1?'':'s') + ' in ' + tableName + '.');
+  };
+
+  const executeDelete = sql => {
+    const clean=sql.trim().replace(/;\s*$/,'').replace(/\s+/g,' ');
+    const match=clean.match(/^DELETE\s+FROM\s+([A-Za-z_][\w]*)(?:\s+WHERE\s+(.+))?$/i);
+    if (!match) throw new Error("DELETE format: DELETE FROM table WHERE id = 1;");
+    const tableName=match[1], table=state.tables[tableName];
+    if (!table) throw new Error('Table "' + tableName + '" does not exist.');
+    const candidates=match[2] ? applyWhere(table.rows,match[2].trim()) : table.rows.slice();
+    const targets=new Set(candidates);
+    const before=table.rows.length;
+    table.rows=table.rows.filter(row => !targets.has(row));
+    const affected=before-table.rows.length;
+    return mutationPreview(tableName,affected,'Deleted ' + affected + ' row' + (affected===1?'':'s') + ' from ' + tableName + '.');
+  };
+
+  const executeSQL = sql => {
+    const keyword=(sql.trim().match(/^([A-Za-z]+)/)?.[1] || '').toUpperCase();
+    if (keyword === 'SELECT') return executeSelect(sql);
+    if (keyword === 'INSERT') return executeInsert(sql);
+    if (keyword === 'UPDATE') return executeUpdate(sql);
+    if (keyword === 'DELETE') return executeDelete(sql);
+    throw new Error('Supported statements are SELECT, INSERT, UPDATE, and DELETE.');
+  };
+
   const renderResult = (result, durationMs=0) => {
     lastResult = result;
-    els.resultSummary.textContent = result.rows.length + ' row' + (result.rows.length === 1 ? '' : 's');
-    els.resultStatus.textContent = 'Query completed in ' + durationMs + ' ms · ' + result.columns.length + ' column' + (result.columns.length === 1 ? '' : 's') + (result.editable ? ' · rows editable' : '');
+    els.resultSummary.textContent = result.mutation
+      ? result.affectedRows + ' row' + (result.affectedRows === 1 ? '' : 's') + ' changed'
+      : result.rows.length + ' row' + (result.rows.length === 1 ? '' : 's');
+    els.resultStatus.textContent = result.mutation
+      ? result.message + ' · Showing current ' + result.sourceTable + ' data.'
+      : 'Query completed in ' + durationMs + ' ms · ' + result.columns.length + ' column' + (result.columns.length === 1 ? '' : 's') + (result.editable ? ' · rows editable' : '');
     els.resultStatus.className = 'result-status success';
 
     if (!result.columns.length) {
@@ -450,13 +555,18 @@
 
   const friendlyQueryError = (error, sql) => {
     const message = String(error?.message || 'Unable to run query.');
-    if (/does not exist/i.test(message)) return message + ' Check the Tables list on the left for the exact table name.';
-    if (/Unsupported WHERE/i.test(message)) return message + ' Try a simple condition like WHERE status = \'Delivered\'.';
+    const keyword=(sql.trim().match(/^([A-Za-z]+)/)?.[1] || '').toUpperCase();
+    if (/does not exist/i.test(message)) return message + ' Check the Tables list on the left for the exact name.';
+    if (/Unsupported WHERE/i.test(message)) return message + " Try a simple condition like WHERE status = 'Delivered'.";
     if (/OR conditions/i.test(message)) return message;
-    if (!/\bFROM\b/i.test(sql) && /^\s*SELECT\b/i.test(sql)) return 'SQL Lab tip: SELECT queries need a FROM clause, for example SELECT * FROM customers;';
-    if (!/^\s*SELECT\b/i.test(sql)) return 'SQL Lab currently focuses on SELECT practice. Start with SELECT, then use FROM, WHERE, GROUP BY, ORDER BY, or LIMIT.';
+    if (keyword === 'SELECT' && !/\bFROM\b/i.test(sql)) return 'SQL Lab tip: SELECT queries need a FROM clause, for example SELECT * FROM customers;';
+    if (keyword === 'INSERT') return message + ' Example: INSERT INTO products (id, name, price) VALUES (106, \'Desk Lamp\', 45);';
+    if (keyword === 'UPDATE') return message + " Example: UPDATE orders SET status = 'Delivered' WHERE id = 9002;";
+    if (keyword === 'DELETE') return message + ' Example: DELETE FROM products WHERE id = 106;';
+    if (!['SELECT','INSERT','UPDATE','DELETE'].includes(keyword)) return 'SQL Lab supports SELECT, INSERT, UPDATE, and DELETE statements.';
     return message + ' Open Examples if you want a working query to compare against.';
   };
+
 
   const challenges = [
     {
@@ -503,6 +613,27 @@
     }
   ];
 
+  const challengeTracks = [
+    { id:'foundations', name:'Foundations', description:'Filtering and sorting', challengeIds:['pro-customers','top-products'] },
+    { id:'aggregates', name:'Aggregates', description:'COUNT, AVG and GROUP BY', challengeIds:['orders-by-status','average-order'] },
+    { id:'joins', name:'Joins', description:'Connecting and summarizing tables', challengeIds:['delivered-customers','revenue-by-product'] }
+  ];
+
+  const trackForChallenge = challenge => challengeTracks.find(track => track.challengeIds.includes(challenge.id)) || challengeTracks[0];
+  const trackComplete = track => track.challengeIds.every(id => state.challengeProgress.includes(id));
+  const trackUnlocked = index => index === 0 || challengeTracks.slice(0,index).every(trackComplete);
+
+  const renderChallengeTracks = () => {
+    const current=challenges[state.challengeIndex] || challenges[0];
+    const active=trackForChallenge(current);
+    els.challengeTracks.innerHTML=challengeTracks.map((track,index) => {
+      const completed=track.challengeIds.filter(id => state.challengeProgress.includes(id)).length;
+      const unlocked=trackUnlocked(index);
+      return '<button type="button" class="track-button ' + (track.id===active.id?'active ':'') + (trackComplete(track)?'complete ':'') + (!unlocked?'locked':'') + '" data-track="' + track.id + '"' + (!unlocked?' disabled':'') + '>' +
+        '<span>' + escapeHtml(track.name) + '</span><small>' + completed + '/' + track.challengeIds.length + (unlocked?'':' · locked') + '</small></button>';
+    }).join('');
+  };
+
   const comparableResult = result => JSON.stringify({
     columns:result.columns,
     rows:result.rows.map(row => result.columns.map(col => {
@@ -516,7 +647,9 @@
     const complete=state.challengeProgress.includes(challenge.id);
     els.challengeProgress.textContent=state.challengeProgress.length + ' / ' + challenges.length + ' completed';
     els.challengeDifficulty.textContent=challenge.difficulty;
+    const track=trackForChallenge(challenge);
     els.challengeNumber.textContent='Challenge ' + (state.challengeIndex + 1) + ' of ' + challenges.length;
+    els.challengeTrackName.textContent=track.name + ' · ' + track.description;
     els.challengeTitle.textContent=challenge.title;
     els.challengeDescription.textContent=challenge.description;
     els.challengeHint.textContent=challenge.hint;
@@ -525,6 +658,7 @@
       ? 'Completed ✓ You can rerun it or move to the next challenge.'
       : 'Run your query and SQL Lab will check the result automatically.';
     els.challengeStatus.className='challenge-status' + (complete ? ' passed' : '');
+    renderChallengeTracks();
   };
 
   const evaluateChallenge = result => {
@@ -535,9 +669,13 @@
       if (!state.challengeProgress.includes(challenge.id)) state.challengeProgress.push(challenge.id);
       save();
       renderChallenge();
-      els.challengeStatus.textContent='Passed ✓ That result is correct.';
+      const track=trackForChallenge(challenge);
+      const finishedTrack=trackComplete(track);
+      els.challengeStatus.textContent=finishedTrack
+        ? 'Track complete ✓ ' + track.name + ' is finished.'
+        : 'Passed ✓ That result is correct.';
       els.challengeStatus.className='challenge-status passed';
-      toast('Challenge passed!');
+      toast(finishedTrack ? track.name + ' track complete!' : 'Challenge passed!');
     } else {
       els.challengeStatus.textContent='Not quite yet — your query ran, but the result does not match the challenge target.';
       els.challengeStatus.className='challenge-status active';
@@ -554,9 +692,72 @@
   };
 
   const moveChallenge = delta => {
-    state.challengeIndex=(state.challengeIndex + delta + challenges.length) % challenges.length;
+    const target=(state.challengeIndex + delta + challenges.length) % challenges.length;
+    const targetTrack=trackForChallenge(challenges[target]);
+    const targetTrackIndex=challengeTracks.findIndex(track => track.id === targetTrack.id);
+    if (!trackUnlocked(targetTrackIndex)) return toast('Finish the previous track to unlock ' + targetTrack.name + '.');
+    state.challengeIndex=target;
     save();
     renderChallenge();
+  };
+
+  const chooseTrack = trackId => {
+    const index=challengeTracks.findIndex(track => track.id === trackId);
+    if (index < 0) return;
+    if (!trackUnlocked(index)) return toast('Finish the previous track first.');
+    const challengeIndex=challenges.findIndex(challenge => challengeTracks[index].challengeIds.includes(challenge.id) && !state.challengeProgress.includes(challenge.id));
+    const firstIndex=challenges.findIndex(challenge => challengeTracks[index].challengeIds.includes(challenge.id));
+    state.challengeIndex=challengeIndex >= 0 ? challengeIndex : firstIndex;
+    save();
+    renderChallenge();
+  };
+
+  const visualizeQuery = (sql, result) => {
+    const clean=sql.trim().replace(/;\s*$/,'').replace(/\s+/g,' ');
+    const keyword=(clean.match(/^([A-Za-z]+)/)?.[1] || '').toUpperCase();
+    const steps=[];
+    const push=(label,value,detail) => steps.push({label,value,detail});
+
+    if (keyword === 'SELECT') {
+      const select=clean.match(/^SELECT\s+(.+?)\s+FROM\s+([A-Za-z_][\w]*)/i);
+      if (select) {
+        push('SELECT',select[1],'Choose the columns or calculations to return.');
+        push('FROM',select[2],'Start with rows from this table.');
+      }
+      const join=clean.match(/(?:INNER\s+)?JOIN\s+([A-Za-z_][\w]*)\s+ON\s+(.+?)(?=\s+WHERE|\s+GROUP\s+BY|\s+ORDER\s+BY|\s+LIMIT|$)/i);
+      if (join) push('JOIN',join[1] + ' ON ' + join[2],'Combine rows where the join condition matches.');
+      const where=clean.match(/\s+WHERE\s+(.+?)(?=\s+GROUP\s+BY|\s+ORDER\s+BY|\s+LIMIT|$)/i);
+      if (where) push('WHERE',where[1],'Keep only rows that match this condition.');
+      const group=clean.match(/\s+GROUP\s+BY\s+([A-Za-z_][\w.]*)/i);
+      if (group) push('GROUP BY',group[1],'Collect matching values into groups before aggregate calculations.');
+      const order=clean.match(/\s+ORDER\s+BY\s+([A-Za-z_][\w.]*)(?:\s+(ASC|DESC))?/i);
+      if (order) push('ORDER BY',order[1] + ' ' + (order[2] || 'ASC'),'Sort the result set.');
+      const limit=clean.match(/\s+LIMIT\s+(\d+)/i);
+      if (limit) push('LIMIT',limit[1],'Return only this many rows.');
+      els.visualizerSummary.textContent='SELECT pipeline · ' + (result?.rows?.length ?? 0) + ' result row' + ((result?.rows?.length ?? 0)===1?'':'s');
+    } else if (keyword === 'INSERT') {
+      const m=clean.match(/^INSERT\s+INTO\s+([A-Za-z_][\w]*)\s*\(([^)]+)\)\s+VALUES\s*\((.*)\)$/i);
+      push('INSERT INTO',m?.[1] || 'table','Choose the table that receives the new row.');
+      if (m) { push('COLUMNS',m[2],'Map the incoming values to these columns.'); push('VALUES',m[3],'Create the new row with these values.'); }
+      els.visualizerSummary.textContent='INSERT pipeline · ' + (result?.affectedRows ?? 0) + ' row changed';
+    } else if (keyword === 'UPDATE') {
+      const m=clean.match(/^UPDATE\s+([A-Za-z_][\w]*)\s+SET\s+(.+?)(?:\s+WHERE\s+(.+))?$/i);
+      push('UPDATE',m?.[1] || 'table','Choose which table to modify.');
+      if (m) { push('SET',m[2],'Assign new values to one or more columns.'); push('WHERE',m[3] || 'all rows','Choose which rows receive the changes.'); }
+      els.visualizerSummary.textContent='UPDATE pipeline · ' + (result?.affectedRows ?? 0) + ' row' + ((result?.affectedRows ?? 0)===1?'':'s') + ' changed';
+    } else if (keyword === 'DELETE') {
+      const m=clean.match(/^DELETE\s+FROM\s+([A-Za-z_][\w]*)(?:\s+WHERE\s+(.+))?$/i);
+      push('DELETE FROM',m?.[1] || 'table','Choose which table loses rows.');
+      if (m) push('WHERE',m[2] || 'all rows','Choose the rows to remove.');
+      els.visualizerSummary.textContent='DELETE pipeline · ' + (result?.affectedRows ?? 0) + ' row' + ((result?.affectedRows ?? 0)===1?'':'s') + ' changed';
+    } else {
+      push('QUERY',keyword || 'Unknown','SQL Lab could not identify this statement.');
+      els.visualizerSummary.textContent='Query flow';
+    }
+
+    els.querySteps.innerHTML=steps.map((step,index) =>
+      '<div class="query-step"><span class="step-number">' + (index+1) + '</span><div><strong>' + escapeHtml(step.label) + '</strong><code>' + escapeHtml(step.value) + '</code><small>' + escapeHtml(step.detail) + '</small></div></div>'
+    ).join('') || '<div class="empty-state">Run a query to visualize its execution steps.</div>';
   };
 
   const runQuery = () => {
@@ -564,13 +765,16 @@
     if (!sql) return toast('Write a query first.');
     const start = performance.now();
     try {
-      const result = executeSelect(sql);
+      const result = executeSQL(sql);
       const duration = Math.max(0, Math.round(performance.now()-start));
       renderResult(result, duration);
-      evaluateChallenge(result);
-      state.history = [{ id:`h-${Date.now()}`, sql, count:result.rows.length, at:Date.now() }, ...state.history.filter(item => item.sql !== sql)].slice(0,30);
+      visualizeQuery(sql,result);
+      if (!result.mutation) evaluateChallenge(result);
+      const count=result.mutation ? result.affectedRows : result.rows.length;
+      state.history = [{ id:`h-${Date.now()}`, sql, count, at:Date.now() }, ...state.history.filter(item => item.sql !== sql)].slice(0,30);
       save();
       renderSidebar();
+      if (result.mutation) { renderSchema(); renderRelationships(); renderBuilder(); }
     } catch (error) {
       els.resultSummary.textContent = 'Query error';
       els.resultStatus.textContent = friendlyQueryError(error, sql);
@@ -581,10 +785,10 @@
 
   const formatQuery = () => {
     let sql = els.queryEditor.value.trim().replace(/\s+/g,' ');
-    for (const keyword of ['SELECT','FROM','INNER JOIN','JOIN','ON','WHERE','GROUP BY','ORDER BY','LIMIT']) {
+    for (const keyword of ['INSERT INTO','DELETE FROM','INNER JOIN','GROUP BY','ORDER BY','SELECT','UPDATE','VALUES','FROM','JOIN','ON','SET','WHERE','LIMIT']) {
       sql = sql.replace(new RegExp(`\\s+${keyword.replace(' ','\\s+')}\\s+`,'ig'), `\n${keyword} `);
     }
-    sql = sql.replace(/^select\s+/i,'SELECT ');
+    sql = sql.replace(/^select\s+/i,'SELECT ').replace(/^insert\s+into\s+/i,'INSERT INTO ').replace(/^update\s+/i,'UPDATE ').replace(/^delete\s+from\s+/i,'DELETE FROM ');
     if (sql && !sql.endsWith(';')) sql += ';';
     els.queryEditor.value = sql;
   };
@@ -878,7 +1082,10 @@
     ['Count by status','SELECT status, COUNT(*) AS orders FROM orders GROUP BY status ORDER BY orders DESC;'],
     ['Average order','SELECT AVG(total) AS average_order FROM orders;'],
     ['Customer orders',"SELECT orders.id, customers.name, orders.total, orders.status FROM orders INNER JOIN customers ON orders.customer_id = customers.id WHERE orders.status = 'Delivered' ORDER BY total DESC;"],
-    ['Product sales','SELECT product_id, SUM(total) AS revenue FROM orders GROUP BY product_id ORDER BY revenue DESC;']
+    ['Product sales','SELECT product_id, SUM(total) AS revenue FROM orders GROUP BY product_id ORDER BY revenue DESC;'],
+    ['Insert a product',"INSERT INTO products (id, name, category, price, stock) VALUES (106, 'Desk Lamp', 'Accessories', 45, 12);"],
+    ['Update an order',"UPDATE orders SET status = 'Delivered' WHERE id = 9002;"],
+    ['Delete a product','DELETE FROM products WHERE id = 106;']
   ];
 
   const renderExamples = () => {
@@ -945,6 +1152,10 @@
   $('tutorial-button').addEventListener('click', () => els.tutorialDialog.showModal());
   $('challenge-button').addEventListener('click', () => els.challengeCard.scrollIntoView({behavior:'smooth',block:'center'}));
   $('share-workspace-button').addEventListener('click', shareWorkspace);
+  els.challengeTracks.addEventListener('click', event => {
+    const button=event.target.closest('[data-track]');
+    if (button && !button.disabled) chooseTrack(button.dataset.track);
+  });
   $('load-challenge-button').addEventListener('click', loadChallenge);
   $('previous-challenge-button').addEventListener('click', () => moveChallenge(-1));
   $('next-challenge-button').addEventListener('click', () => moveChallenge(1));

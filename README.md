@@ -8,7 +8,7 @@ The first version was a tiny Node/Express experiment that connected to MySQL and
 
 - Browse multiple sample tables
 - Create your own tables and add, edit, or delete rows
-- Run SQL-style `SELECT` queries
+- Run `SELECT`, `INSERT`, `UPDATE`, and `DELETE` queries
 - Filter with `WHERE`
 - Sort with `ORDER BY`
 - Limit results with `LIMIT`
@@ -16,7 +16,7 @@ The first version was a tiny Node/Express experiment that connected to MySQL and
 - Group results with `GROUP BY`
 - Run simple `INNER JOIN` queries
 - Build queries visually without typing SQL
-- Save queries and revisit query history\n- Work through six built-in SQL practice challenges with automatic result checking and hints
+- Save queries and revisit query history\n- Work through six built-in SQL practice challenges organized into unlockable Foundations, Aggregates, and Joins tracks\n- See every supported query broken into a step-by-step visual execution pipeline
 - Inspect table schemas and relationships
 - Import CSV data
 - Export the full workspace as JSON\n- Copy a self-contained share link that can reopen the same local workspace
@@ -51,7 +51,7 @@ LIMIT ...
 
 Aggregates currently include `COUNT`, `SUM`, and `AVG`.
 
-This is a learning playground, not a full SQL database engine.
+Mutation statements change only the local browser workspace. This is a learning playground, not a full SQL database engine.
 
 ## Example queries
 

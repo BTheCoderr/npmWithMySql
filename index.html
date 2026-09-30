@@ -82,9 +82,11 @@
             </div>
             <span class="challenge-difficulty" id="challenge-difficulty">Beginner</span>
           </div>
+          <div class="challenge-tracks" id="challenge-tracks"></div>
           <div class="challenge-body">
             <div class="challenge-copy">
               <span id="challenge-number">Challenge 1 of 6</span>
+              <span class="challenge-track-label" id="challenge-track-name">Foundations</span>
               <h2 id="challenge-title">Filter the Pro customers</h2>
               <p id="challenge-description">Return the requested columns and rows using SQL.</p>
               <p class="challenge-hint" id="challenge-hint" hidden></p>
@@ -112,9 +114,20 @@
           </div>
           <textarea id="query-editor" spellcheck="false" aria-label="SQL query editor">SELECT * FROM customers;</textarea>
           <div class="query-help">
-            <span>Supports SELECT, WHERE, ORDER BY, LIMIT, COUNT/SUM/AVG, GROUP BY, and simple INNER JOIN.</span>
+            <span>Supports SELECT, INSERT, UPDATE, DELETE, WHERE, ORDER BY, LIMIT, aggregates, GROUP BY, and simple INNER JOIN.</span>
             <button id="examples-button" type="button">Examples</button>
           </div>
+        </section>
+
+        <section class="visualizer-card" id="query-visualizer">
+          <div class="visualizer-head">
+            <div>
+              <span class="eyebrow">QUERY VISUALIZER</span>
+              <strong id="visualizer-summary">SELECT from customers</strong>
+            </div>
+            <span class="visualizer-note">How SQL Lab reads your query</span>
+          </div>
+          <div class="query-steps" id="query-steps"></div>
         </section>
 
         <section class="builder-card">

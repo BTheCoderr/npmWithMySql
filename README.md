@@ -1,49 +1,94 @@
-# NPM With My Sql
+# SQL Lab
 
-This project is a simple example to demonstrate the use of a `.gitignore` file to exclude sensitive files and directories from being tracked by Git. The `.gitignore` file includes entries for `node_modules/` and `.env` to prevent these files from being pushed to GitHub.
+SQL Lab is the modern rebuild of the original `npmWithMySql` practice repo.
 
-## Getting Started
+The first version was a tiny Node/Express experiment that connected to MySQL and inserted one hard-coded employee. The rebuilt version keeps the database-learning goal but turns it into a complete local-first SQL playground that runs entirely in the browser.
 
-### Prerequisites
+## What you can do
 
-Make sure you have Git installed on your machine. You can download it from [here](https://git-scm.com/).
+- Browse multiple sample tables
+- Create your own tables and add rows
+- Run SQL-style `SELECT` queries
+- Filter with `WHERE`
+- Sort with `ORDER BY`
+- Limit results with `LIMIT`
+- Use `COUNT`, `SUM`, and `AVG`
+- Group results with `GROUP BY`
+- Run simple `INNER JOIN` queries
+- Build queries visually without typing SQL
+- Save queries and revisit query history
+- Inspect table schemas and relationships
+- Import CSV data
+- Export the full workspace as JSON
+- Export the local database as SQL
+- Copy result sets as CSV
+- Reset to the built-in Customers / Products / Orders sample database
+- Install the app and keep the shell available offline after the first visit
 
-### Installation
+## Local-first storage
 
-1. Clone the repository to your local machine:
+All workspace data is stored in the browser under:
 
-    ```bash
-    git clone https://github.com/yourusername/yourrepositoryname.git
-    ```
+```
+sql-lab-v1
+```
 
-2. Navigate to the project directory:
+There is no account, hosted database, or backend requirement.
 
-    ```bash
-    cd yourrepositoryname
-    ```
+## Supported SQL subset
 
-3. Install the project dependencies:
+SQL Lab intentionally focuses on a beginner-friendly subset:
 
-    ```bash
-    npm install
-    ```
+```sql
+SELECT ...
+FROM ...
+INNER JOIN ... ON ...
+WHERE ...
+GROUP BY ...
+ORDER BY ...
+LIMIT ...
+```
 
-### Usage
+Aggregates currently include `COUNT`, `SUM`, and `AVG`.
 
-You can start working on your project as needed. Ensure that you do not push sensitive information to the repository by including the necessary entries in your `.gitignore` file.
+This is a learning playground, not a full SQL database engine.
 
-### Contributing
+## Example queries
 
-If you wish to contribute to this project, please fork the repository and create a pull request with your changes. Make sure to follow the existing code style and include tests for new features or bug fixes.
+```sql
+SELECT name, city, plan
+FROM customers
+WHERE plan = 'Pro'
+ORDER BY name ASC;
+```
 
+```sql
+SELECT status, COUNT(*) AS orders
+FROM orders
+GROUP BY status
+ORDER BY orders DESC;
+```
 
----
+```sql
+SELECT orders.id, customers.name, orders.total
+FROM orders
+INNER JOIN customers ON orders.customer_id = customers.id
+WHERE orders.status = 'Delivered'
+ORDER BY total DESC;
+```
 
-**Note:** Make sure to replace `yourusername` and `yourrepositoryname` with your actual GitHub username and repository name.
+## Run locally
 
-### GitHub Repository Description
+No build step is required. Open `index.html` directly, or use:
 
-Here is a suggested description for your GitHub repository:
+```bash
+npm start
+```
 
-```markdown
-A simple example project demonstrating the use of a `.gitignore` file to exclude sensitive files and directories from being tracked by Git. The `.gitignore` file includes entries for `node_modules/` and `.env` to prevent these files from being pushed to GitHub.
+## Netlify
+
+The project is a static site. `netlify.toml` publishes the repository root directly.
+
+## Why this repo changed
+
+The original project documented an early step in learning Node and MySQL. SQL Lab preserves that history while turning the same learning goal into something interactive, reusable, and portfolio-ready.

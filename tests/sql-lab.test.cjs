@@ -6,7 +6,7 @@ test('SELECT filters and sorts sample data', () => {
   const h=createHarness();
   const result=h.api.executeSQL("SELECT name, city FROM customers WHERE plan = 'Pro' ORDER BY name ASC;");
   assert.deepEqual(Array.from(result.columns), ['name','city']);
-  assert.deepEqual(result.rows.map(row => row.name), ['Ava Brooks','Lucas Kim','Maya Patel']);
+  assert.deepEqual(Array.from(result.rows, row => row.name), ['Ava Brooks','Lucas Kim','Maya Patel']);
 });
 
 test('aggregates and joins return expected results', () => {

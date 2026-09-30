@@ -1,11 +1,13 @@
 {
   "name": "sql-lab-local",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
-  "description": "A local-first SQL playground for practicing queries, schemas, joins, filters, aggregates, and data import/export in the browser.",
+  "description": "A local-first SQL learning IDE with query tabs, safe mutations, visual execution, challenges, imports, and offline support.",
   "scripts": {
     "start": "npx serve .",
-    "check": "node --check index.js"
+    "check": "node --check index.js && node --check sw.js",
+    "test": "node --test tests/*.test.cjs",
+    "ci": "npm run check && npm test"
   },
   "license": "MIT"
 }

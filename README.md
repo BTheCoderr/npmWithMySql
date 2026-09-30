@@ -1,5 +1,7 @@
 # SQL Lab
 
+![CI](https://github.com/BTheCoderr/npmWithMySql/actions/workflows/ci.yml/badge.svg)
+
 SQL Lab is the modern rebuild of the original `npmWithMySql` practice repo.
 
 The first version was a tiny Node/Express experiment that connected to MySQL and inserted one hard-coded employee. The rebuilt version keeps the database-learning goal but turns it into a complete local-first SQL playground that runs entirely in the browser.
@@ -9,6 +11,9 @@ The first version was a tiny Node/Express experiment that connected to MySQL and
 - Browse multiple sample tables
 - Create your own tables and add, edit, or delete rows
 - Run `SELECT`, `INSERT`, `UPDATE`, and `DELETE` queries
+- Preview mutations in Safe Mode, then explicitly Commit or Rollback
+- Undo and redo committed SQL mutations during the current session
+- Work across up to eight persistent SQL editor tabs
 - Filter with `WHERE`
 - Sort with `ORDER BY`
 - Limit results with `LIMIT`
@@ -47,6 +52,9 @@ WHERE ...
 GROUP BY ...
 ORDER BY ...
 LIMIT ...
+INSERT INTO ... VALUES ...
+UPDATE ... SET ... WHERE ...
+DELETE FROM ... WHERE ...
 ```
 
 Aggregates currently include `COUNT`, `SUM`, and `AVG`.
@@ -77,6 +85,15 @@ WHERE orders.status = 'Delivered'
 ORDER BY total DESC;
 ```
 
+## Engineering notes
+
+- No framework or database dependency: the SQL subset is parsed and executed locally in the browser.
+- Mutating statements run in a preview transaction by default. The persisted workspace is not changed until Commit.
+- Query tabs and workspace data persist through local storage.
+- Undo/redo snapshots are intentionally session-scoped so large database copies do not bloat persistent storage.
+- The test suite loads the real browser bundle in a lightweight DOM harness and exercises SELECTs, aggregates, joins, mutations, safe transactions, undo/redo, and editor tabs.
+- GitHub Actions runs syntax checks and the Node test suite on pushes and pull requests.
+
 ## Run locally
 
 No build step is required. Open `index.html` directly, or use:
@@ -85,9 +102,9 @@ No build step is required. Open `index.html` directly, or use:
 npm start
 ```
 
-## Netlify
+## Deployment
 
-The project is a static site. `netlify.toml` publishes the repository root directly.
+The project is a static site with no build step. `vercel.json` prepares it for Vercel, while `netlify.toml` remains available for Netlify-compatible hosting.
 
 ## Why this repo changed
 

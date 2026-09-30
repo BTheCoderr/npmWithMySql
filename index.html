@@ -102,6 +102,10 @@
         </section>
 
         <section class="editor-card">
+          <div class="query-tabs-bar">
+            <div class="query-tab-list" id="query-tab-list"></div>
+            <button class="new-query-tab" id="new-query-tab-button" type="button">+ Query</button>
+          </div>
           <div class="editor-head">
             <div>
               <span class="eyebrow">QUERY EDITOR</span>
@@ -116,6 +120,16 @@
           <div class="query-help">
             <span>Supports SELECT, INSERT, UPDATE, DELETE, WHERE, ORDER BY, LIMIT, aggregates, GROUP BY, and simple INNER JOIN.</span>
             <button id="examples-button" type="button">Examples</button>
+          </div>
+          <div class="transaction-toolbar">
+            <button class="safe-mode-button" id="safe-mode-button" type="button">Safe mutations: ON</button>
+            <span id="transaction-status">No pending mutation</span>
+            <div class="transaction-actions">
+              <button id="undo-mutation-button" type="button" disabled>Undo</button>
+              <button id="redo-mutation-button" type="button" disabled>Redo</button>
+              <button id="rollback-transaction-button" type="button" disabled>Rollback</button>
+              <button class="commit-button" id="commit-transaction-button" type="button" disabled>Commit</button>
+            </div>
           </div>
         </section>
 

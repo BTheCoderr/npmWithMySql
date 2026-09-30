@@ -60,7 +60,10 @@
     ],
     history: [],
     challengeIndex: 0,
-    challengeProgress: []
+    challengeProgress: [],
+    safeMutations: true,
+    queryTabs: [{ id:'query-1', title:'Query 1', sql:'SELECT * FROM customers;' }],
+    activeQueryTabId: 'query-1'
   });
 
   const normalizeState = raw => {
@@ -83,9 +86,19 @@
       savedQueries:Array.isArray(raw.savedQueries) ? raw.savedQueries.filter(Boolean).slice(0,30) : base.savedQueries,
       history:Array.isArray(raw.history) ? raw.history.filter(Boolean).slice(0,30) : [],
       challengeIndex:Number.isInteger(raw.challengeIndex) ? Math.max(0, Math.min(5, raw.challengeIndex)) : 0,
-      challengeProgress:Array.isArray(raw.challengeProgress) ? [...new Set(raw.challengeProgress.filter(value => typeof value === 'string'))].slice(0,20) : []
+      challengeProgress:Array.isArray(raw.challengeProgress) ? [...new Set(raw.challengeProgress.filter(value => typeof value === 'string'))].slice(0,20) : [],
+      safeMutations:raw.safeMutations !== false,
+      queryTabs:Array.isArray(raw.queryTabs) && raw.queryTabs.length
+        ? raw.queryTabs.slice(0,8).map((tab,index) => ({
+            id:typeof tab?.id === 'string' ? tab.id : 'query-' + (index+1),
+            title:typeof tab?.title === 'string' && tab.title.trim() ? tab.title.slice(0,30) : 'Query ' + (index+1),
+            sql:typeof tab?.sql === 'string' ? tab.sql.slice(0,20000) : ''
+          }))
+        : base.queryTabs,
+      activeQueryTabId:typeof raw.activeQueryTabId === 'string' ? raw.activeQueryTabId : base.activeQueryTabId
     };
     if (!next.tables[next.activeTable]) next.activeTable = Object.keys(next.tables)[0];
+    if (!next.queryTabs.some(tab => tab.id === next.activeQueryTabId)) next.activeQueryTabId=next.queryTabs[0].id;
     return next;
   };
 
@@ -97,6 +110,9 @@
   let state = loadState();
   let lastResult = { columns:[], rows:[] };
   let editingRowIndex = null;
+  let pendingTransaction = null;
+  let undoStack = [];
+  let redoStack = [];
   let toastTimer = null;
 
   const $ = id => document.getElementById(id);
@@ -115,16 +131,91 @@
     challengeNumber:$('challenge-number'), challengeTitle:$('challenge-title'), challengeDescription:$('challenge-description'),
     challengeHint:$('challenge-hint'), challengeStatus:$('challenge-status'),
     challengeTracks:$('challenge-tracks'), challengeTrackName:$('challenge-track-name'),
-    visualizerSummary:$('visualizer-summary'), querySteps:$('query-steps')
+    visualizerSummary:$('visualizer-summary'), querySteps:$('query-steps'),
+    queryTabList:$('query-tab-list'), safeModeButton:$('safe-mode-button'), transactionStatus:$('transaction-status'),
+    undoMutationButton:$('undo-mutation-button'), redoMutationButton:$('redo-mutation-button'),
+    rollbackTransactionButton:$('rollback-transaction-button'), commitTransactionButton:$('commit-transaction-button')
   };
 
-  const save = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const deepClone = value => JSON.parse(JSON.stringify(value));
+
+  const save = () => {
+    const persisted = pendingTransaction
+      ? { ...state, tables:deepClone(pendingTransaction.beforeTables) }
+      : state;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+  };
 
   const toast = message => {
     clearTimeout(toastTimer);
     els.toast.textContent = message;
     els.toast.classList.add('show');
     toastTimer = setTimeout(() => els.toast.classList.remove('show'), 1800);
+  };
+
+  const currentQueryTab = () => state.queryTabs.find(tab => tab.id === state.activeQueryTabId) || state.queryTabs[0];
+
+  const renderQueryTabs = () => {
+    els.queryTabList.innerHTML=state.queryTabs.map(tab =>
+      '<div class="query-tab ' + (tab.id===state.activeQueryTabId?'active':'') + '" data-query-tab="' + escapeHtml(tab.id) + '">' +
+        '<button type="button" class="query-tab-main" data-switch-query-tab="' + escapeHtml(tab.id) + '">' + escapeHtml(tab.title) + '</button>' +
+        (state.queryTabs.length > 1 ? '<button type="button" class="query-tab-close" aria-label="Close ' + escapeHtml(tab.title) + '" data-close-query-tab="' + escapeHtml(tab.id) + '">×</button>' : '') +
+      '</div>'
+    ).join('');
+  };
+
+  const syncActiveTabFromEditor = () => {
+    const tab=currentQueryTab();
+    if (tab) tab.sql=els.queryEditor.value.slice(0,20000);
+  };
+
+  const setEditorSQL = (sql, persist=true) => {
+    els.queryEditor.value=String(sql ?? '');
+    syncActiveTabFromEditor();
+    if (persist) save();
+    renderQueryTabs();
+  };
+
+  const loadActiveQueryTab = () => {
+    const tab=currentQueryTab();
+    els.queryEditor.value=tab?.sql || '';
+    renderQueryTabs();
+  };
+
+  const createQueryTab = () => {
+    syncActiveTabFromEditor();
+    if (state.queryTabs.length >= 8) return toast('SQL Lab supports up to 8 query tabs.');
+    let number=1;
+    const titles=new Set(state.queryTabs.map(tab => tab.title));
+    while (titles.has('Query ' + number)) number++;
+    const id='query-' + Date.now().toString(36) + '-' + number;
+    const tab={ id, title:'Query ' + number, sql:state.activeTable ? 'SELECT * FROM ' + state.activeTable + ';' : '' };
+    state.queryTabs.push(tab);
+    state.activeQueryTabId=id;
+    els.queryEditor.value=tab.sql;
+    save();
+    renderQueryTabs();
+    els.queryEditor.focus();
+  };
+
+  const switchQueryTab = id => {
+    if (!state.queryTabs.some(tab => tab.id === id) || id === state.activeQueryTabId) return;
+    syncActiveTabFromEditor();
+    state.activeQueryTabId=id;
+    loadActiveQueryTab();
+    save();
+  };
+
+  const closeQueryTab = id => {
+    if (state.queryTabs.length <= 1) return toast('Keep at least one query tab open.');
+    syncActiveTabFromEditor();
+    const index=state.queryTabs.findIndex(tab => tab.id === id);
+    if (index < 0) return;
+    const wasActive=id===state.activeQueryTabId;
+    state.queryTabs.splice(index,1);
+    if (wasActive) state.activeQueryTabId=state.queryTabs[Math.min(index,state.queryTabs.length-1)].id;
+    loadActiveQueryTab();
+    save();
   };
 
   const escapeHtml = value => String(value ?? '')
@@ -218,7 +309,7 @@
   const chooseTable = name => {
     if (!state.tables[name]) return;
     state.activeTable = name;
-    els.queryEditor.value = `SELECT * FROM ${name};`;
+    setEditorSQL(`SELECT * FROM ${name};`);
     save();
     renderAll();
     runQuery();
@@ -520,6 +611,100 @@
     throw new Error('Supported statements are SELECT, INSERT, UPDATE, and DELETE.');
   };
 
+  const tableResult = tableName => {
+    const table=state.tables[tableName];
+    if (!table) return {columns:[],rows:[],editable:false,sourceTable:tableName};
+    return {
+      columns:table.columns.map(col => col.name),
+      rows:table.rows.map((row,index) => {
+        const output={...row};
+        Object.defineProperty(output,'__sourceIndex',{value:index,enumerable:false});
+        return output;
+      }),
+      editable:true,
+      sourceTable:tableName
+    };
+  };
+
+  const renderTransactionToolbar = () => {
+    els.safeModeButton.textContent='Safe mutations: ' + (state.safeMutations ? 'ON' : 'OFF');
+    els.safeModeButton.classList.toggle('active',state.safeMutations);
+    const pending=Boolean(pendingTransaction);
+    els.transactionStatus.textContent=pending
+      ? 'Pending · ' + pendingTransaction.label
+      : (undoStack.length ? undoStack.length + ' committed change' + (undoStack.length===1?'':'s') + ' can be undone' : 'No pending mutation');
+    els.commitTransactionButton.disabled=!pending;
+    els.rollbackTransactionButton.disabled=!pending;
+    els.undoMutationButton.disabled=pending || undoStack.length===0;
+    els.redoMutationButton.disabled=pending || redoStack.length===0;
+  };
+
+  const recordCommittedMutation = (label,beforeTables,afterTables) => {
+    undoStack.push({label,beforeTables:deepClone(beforeTables),afterTables:deepClone(afterTables)});
+    undoStack=undoStack.slice(-20);
+    redoStack=[];
+  };
+
+  const refreshAfterHistoryChange = message => {
+    if (!state.tables[state.activeTable]) state.activeTable=Object.keys(state.tables)[0] || '';
+    renderAll();
+    const preview=tableResult(state.activeTable);
+    renderResult(preview,0);
+    els.resultStatus.textContent=message;
+    els.resultStatus.className='result-status success';
+    renderTransactionToolbar();
+  };
+
+  const commitPendingTransaction = () => {
+    if (!pendingTransaction) return toast('No pending mutation to commit.');
+    const tx=pendingTransaction;
+    const afterTables=deepClone(state.tables);
+    pendingTransaction=null;
+    recordCommittedMutation(tx.label,tx.beforeTables,afterTables);
+    save();
+    refreshAfterHistoryChange('Committed · ' + tx.label);
+    toast('Mutation committed.');
+  };
+
+  const rollbackPendingTransaction = () => {
+    if (!pendingTransaction) return toast('No pending mutation to roll back.');
+    const tx=pendingTransaction;
+    state.tables=deepClone(tx.beforeTables);
+    pendingTransaction=null;
+    save();
+    refreshAfterHistoryChange('Rolled back · ' + tx.label);
+    toast('Mutation rolled back.');
+  };
+
+  const undoMutation = () => {
+    if (pendingTransaction) return toast('Commit or roll back the pending mutation first.');
+    const entry=undoStack.pop();
+    if (!entry) return toast('Nothing to undo.');
+    state.tables=deepClone(entry.beforeTables);
+    redoStack.push(entry);
+    save();
+    refreshAfterHistoryChange('Undid · ' + entry.label);
+    toast('Last mutation undone.');
+  };
+
+  const redoMutation = () => {
+    if (pendingTransaction) return toast('Commit or roll back the pending mutation first.');
+    const entry=redoStack.pop();
+    if (!entry) return toast('Nothing to redo.');
+    state.tables=deepClone(entry.afterTables);
+    undoStack.push(entry);
+    save();
+    refreshAfterHistoryChange('Redid · ' + entry.label);
+    toast('Mutation reapplied.');
+  };
+
+  const setSafeMutations = value => {
+    if (pendingTransaction) return toast('Commit or roll back the pending mutation first.');
+    state.safeMutations=Boolean(value);
+    save();
+    renderTransactionToolbar();
+  };
+
   const renderResult = (result, durationMs=0) => {
     lastResult = result;
     els.resultSummary.textContent = result.mutation
@@ -684,7 +869,7 @@
 
   const loadChallenge = () => {
     const challenge=challenges[state.challengeIndex] || challenges[0];
-    els.queryEditor.value=challenge.starter;
+    setEditorSQL(challenge.starter);
     els.challengeHint.hidden=true;
     els.queryEditor.focus();
     els.challengeStatus.textContent='Challenge loaded. Edit the starter query, then Run query.';
@@ -761,12 +946,28 @@
   };
 
   const runQuery = () => {
+    syncActiveTabFromEditor();
     const sql = els.queryEditor.value.trim();
     if (!sql) return toast('Write a query first.');
+    const keyword=(sql.match(/^([A-Za-z]+)/)?.[1] || '').toUpperCase();
+    const isMutation=['INSERT','UPDATE','DELETE'].includes(keyword);
+    if (isMutation && pendingTransaction) return toast('Commit or roll back the pending mutation before running another mutation.');
+
+    const beforeTables=isMutation ? deepClone(state.tables) : null;
     const start = performance.now();
     try {
       const result = executeSQL(sql);
       const duration = Math.max(0, Math.round(performance.now()-start));
+
+      if (isMutation) {
+        const label=result.message || (keyword + ' mutation');
+        if (state.safeMutations) {
+          pendingTransaction={label,sql,beforeTables};
+        } else {
+          recordCommittedMutation(label,beforeTables,deepClone(state.tables));
+        }
+      }
+
       renderResult(result, duration);
       visualizeQuery(sql,result);
       if (!result.mutation) evaluateChallenge(result);
@@ -775,10 +976,18 @@
       save();
       renderSidebar();
       if (result.mutation) { renderSchema(); renderRelationships(); renderBuilder(); }
+      renderTransactionToolbar();
+      if (isMutation && state.safeMutations) {
+        els.resultStatus.textContent = result.message + ' · Preview only. Commit to keep it or Rollback to discard it.';
+        els.resultStatus.className='result-status pending';
+      }
     } catch (error) {
+      if (isMutation && beforeTables) state.tables=deepClone(beforeTables);
+      pendingTransaction=null;
       els.resultSummary.textContent = 'Query error';
       els.resultStatus.textContent = friendlyQueryError(error, sql);
       els.resultStatus.className = 'result-status error';
+      renderTransactionToolbar();
       toast('Query needs a fix.');
     }
   };
@@ -790,7 +999,7 @@
     }
     sql = sql.replace(/^select\s+/i,'SELECT ').replace(/^insert\s+into\s+/i,'INSERT INTO ').replace(/^update\s+/i,'UPDATE ').replace(/^delete\s+from\s+/i,'DELETE FROM ');
     if (sql && !sql.endsWith(';')) sql += ';';
-    els.queryEditor.value = sql;
+    setEditorSQL(sql);
   };
 
   const applyBuilder = () => {
@@ -807,7 +1016,7 @@
     }
     if (els.builderSortColumn.value) sql += ` ORDER BY ${els.builderSortColumn.value} ${els.builderSortDirection.value}`;
     if (els.builderLimit.value) sql += ` LIMIT ${Math.max(1,Math.min(500,Number(els.builderLimit.value)))}`;
-    els.queryEditor.value = sql + ';';
+    setEditorSQL(sql + ';');
     state.activeTable = table;
     save();
     renderAll();
@@ -839,7 +1048,7 @@
       els.tableDialog.close();
       els.newTableName.value = '';
       els.newTableColumns.value = '';
-      els.queryEditor.value = `SELECT * FROM ${name};`;
+      setEditorSQL(`SELECT * FROM ${name};`);
       renderAll();
       runQuery();
       toast(`${name} created.`);
@@ -919,7 +1128,7 @@
     state.relationships = state.relationships.filter(rel => !String(rel.from).startsWith(name+'.') && !String(rel.to).startsWith(name+'.'));
     state.activeTable = Object.keys(state.tables)[0] || '';
     save();
-    els.queryEditor.value = state.activeTable ? `SELECT * FROM ${state.activeTable};` : '';
+    setEditorSQL(state.activeTable ? `SELECT * FROM ${state.activeTable};` : '');
     renderAll();
     if (state.activeTable) runQuery();
     else renderResult({columns:[],rows:[]});
@@ -1006,7 +1215,7 @@
         const parsed = JSON.parse(text);
         state = normalizeState(parsed);
         save(); renderAll();
-        els.queryEditor.value = `SELECT * FROM ${state.activeTable};`;
+        setEditorSQL(`SELECT * FROM ${state.activeTable};`);
         runQuery();
         toast('SQL Lab backup imported.');
       } else {
@@ -1023,7 +1232,7 @@
         const dataRows = rows.slice(1).map(values => Object.fromEntries(headers.map((header,index) => [header, stripQuotes(values[index] ?? '')])));
         state.tables[name] = { columns:headers.map(header => ({name:header,type:'text'})), rows:dataRows };
         state.activeTable=name; save(); renderAll();
-        els.queryEditor.value=`SELECT * FROM ${name};`; runQuery(); toast(`${name} imported.`);
+        setEditorSQL(`SELECT * FROM ${name};`); runQuery(); toast(`${name} imported.`);
       }
     } catch (error) { toast(error.message || 'Import failed.'); }
     finally { els.importFile.value=''; }
@@ -1104,19 +1313,32 @@
   els.savedQueryList.addEventListener('click', event => {
     const button = event.target.closest('[data-saved-query]');
     const item = state.savedQueries.find(query => query.id === button?.dataset.savedQuery);
-    if (item) { els.queryEditor.value=item.sql; runQuery(); }
+    if (item) { setEditorSQL(item.sql); runQuery(); }
   });
 
   els.queryHistoryList.addEventListener('click', event => {
     const button = event.target.closest('[data-history-query]');
     const item = state.history.find(query => query.id === button?.dataset.historyQuery);
-    if (item) { els.queryEditor.value=item.sql; runQuery(); }
+    if (item) { setEditorSQL(item.sql); runQuery(); }
   });
 
   els.builderTable.addEventListener('change', () => {
     state.activeTable = els.builderTable.value;
     save(); renderAll();
   });
+
+  els.queryTabList.addEventListener('click', event => {
+    const close=event.target.closest('[data-close-query-tab]');
+    if (close) return closeQueryTab(close.dataset.closeQueryTab);
+    const tab=event.target.closest('[data-switch-query-tab]');
+    if (tab) switchQueryTab(tab.dataset.switchQueryTab);
+  });
+  $('new-query-tab-button').addEventListener('click', createQueryTab);
+  els.safeModeButton.addEventListener('click', () => setSafeMutations(!state.safeMutations));
+  els.commitTransactionButton.addEventListener('click', commitPendingTransaction);
+  els.rollbackTransactionButton.addEventListener('click', rollbackPendingTransaction);
+  els.undoMutationButton.addEventListener('click', undoMutation);
+  els.redoMutationButton.addEventListener('click', redoMutation);
 
   $('run-query-button').addEventListener('click', runQuery);
   $('format-query-button').addEventListener('click', formatQuery);
@@ -1136,7 +1358,7 @@
   $('clear-history-button').addEventListener('click', () => { state.history=[]; save(); renderSidebar(); });
   $('reset-samples-button').addEventListener('click', () => {
     if (!confirm('Reset SQL Lab to the original sample database?')) return;
-    state=sampleState(); save(); els.queryEditor.value='SELECT * FROM customers;'; renderAll(); runQuery(); toast('Samples reset.');
+    state=sampleState(); pendingTransaction=null; undoStack=[]; redoStack=[]; loadActiveQueryTab(); save(); renderAll(); renderQueryTabs(); renderTransactionToolbar(); runQuery(); toast('Samples reset.');
   });
   $('copy-results-button').addEventListener('click', async () => {
     if (!lastResult.columns.length) return toast('Run a query first.');
@@ -1167,9 +1389,14 @@
     if (!button) return;
     const item=examples[Number(button.dataset.example)];
     if (!item) return;
-    els.queryEditor.value=item[1];
+    setEditorSQL(item[1]);
     els.examplesDialog.close();
     runQuery();
+  });
+
+  els.queryEditor.addEventListener('input', () => {
+    syncActiveTabFromEditor();
+    save();
   });
 
   els.queryEditor.addEventListener('keydown', event => {
@@ -1184,10 +1411,35 @@
     }
   });
 
+  if (typeof globalThis !== 'undefined' && globalThis.__SQL_LAB_TEST__) {
+    globalThis.SQLLabTest={
+      executeSQL,
+      executeSelect,
+      runQuery,
+      commitPendingTransaction,
+      rollbackPendingTransaction,
+      undoMutation,
+      redoMutation,
+      setSafeMutations,
+      createQueryTab,
+      switchQueryTab,
+      closeQueryTab,
+      setEditorSQL,
+      getState:() => deepClone(state),
+      getPendingTransaction:() => pendingTransaction ? {label:pendingTransaction.label,sql:pendingTransaction.sql} : null,
+      getUndoCount:() => undoStack.length,
+      getRedoCount:() => redoStack.length,
+      getChallengeCount:() => challenges.length
+    };
+  }
+
   importSharedWorkspace();
+  loadActiveQueryTab();
   renderExamples();
   renderAll();
+  renderQueryTabs();
   renderChallenge();
+  renderTransactionToolbar();
   runQuery();
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {

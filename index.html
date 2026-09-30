@@ -1,11 +1,181 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hello Geeks!</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#08111f">
+  <meta name="description" content="SQL Lab is a local-first SQL playground for exploring tables, queries, joins, filters, aggregates, and schemas in the browser.">
+  <title>SQL Lab — Local Database Playground</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <h1>Hello Geeks!</h1>
+  <div class="app-shell">
+    <header class="topbar">
+      <button class="brand" id="brand-button" type="button">
+        <span class="brand-mark">SQL</span>
+        <span><strong>SQL Lab</strong><small>Local database playground</small></span>
+      </button>
+      <div class="top-actions">
+        <button class="ghost-button" id="tutorial-button" type="button">Tutorial</button>
+        <button class="ghost-button" id="import-button" type="button">Import</button>
+        <button class="primary-button compact" id="new-table-button" type="button">+ Table</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <span class="eyebrow">DATABASE</span>
+          <strong id="database-name">Playground</strong>
+        </div>
+
+        <div class="schema-summary">
+          <div><strong id="table-count">0</strong><span>tables</span></div>
+          <div><strong id="row-count">0</strong><span>rows</span></div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-title"><span>Tables</span><button id="reset-samples-button" type="button">Reset samples</button></div>
+          <div class="table-list" id="table-list"></div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-title"><span>Saved queries</span><button id="save-current-query-button" type="button">Save</button></div>
+          <div class="saved-list" id="saved-query-list"></div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-title"><span>History</span><button id="clear-history-button" type="button">Clear</button></div>
+          <div class="history-list" id="query-history-list"></div>
+        </div>
+
+        <div class="sidebar-footer">
+          <button id="export-json-button" type="button">Export JSON</button>
+          <button id="export-sql-button" type="button">Export SQL</button>
+          <input id="import-file" type="file" accept=".json,.csv,application/json,text/csv" hidden>
+        </div>
+      </aside>
+
+      <section class="main-panel">
+        <div class="hero">
+          <div>
+            <span class="eyebrow">SQL PLAYGROUND</span>
+            <h1>Learn SQL by <span>doing it.</span></h1>
+            <p>Build tables, run queries, inspect schemas, practice joins, and keep everything on your device.</p>
+          </div>
+          <div class="hero-badges">
+            <span>Local-first</span>
+            <span>No database required</span>
+            <span>Offline-friendly</span>
+          </div>
+        </div>
+
+        <section class="editor-card">
+          <div class="editor-head">
+            <div>
+              <span class="eyebrow">QUERY EDITOR</span>
+              <strong id="query-context">customers</strong>
+            </div>
+            <div class="editor-actions">
+              <button class="ghost-button compact" id="format-query-button" type="button">Format</button>
+              <button class="primary-button compact" id="run-query-button" type="button">Run query ⌘↵</button>
+            </div>
+          </div>
+          <textarea id="query-editor" spellcheck="false" aria-label="SQL query editor">SELECT * FROM customers;</textarea>
+          <div class="query-help">
+            <span>Supports SELECT, WHERE, ORDER BY, LIMIT, COUNT/SUM/AVG, GROUP BY, and simple INNER JOIN.</span>
+            <button id="examples-button" type="button">Examples</button>
+          </div>
+        </section>
+
+        <section class="builder-card">
+          <div class="builder-head">
+            <div><span class="eyebrow">VISUAL BUILDER</span><strong>Build a query without typing SQL</strong></div>
+            <button class="ghost-button compact" id="apply-builder-button" type="button">Use in editor</button>
+          </div>
+          <div class="builder-grid">
+            <label><span>Table</span><select id="builder-table"></select></label>
+            <label><span>Columns</span><input id="builder-columns" value="*" placeholder="*, name, email"></label>
+            <label><span>Filter column</span><select id="builder-filter-column"><option value="">No filter</option></select></label>
+            <label><span>Operator</span><select id="builder-operator"><option>=</option><option>!=</option><option>&gt;</option><option>&gt;=</option><option>&lt;</option><option>&lt;=</option><option>LIKE</option></select></label>
+            <label><span>Filter value</span><input id="builder-filter-value" placeholder="Boston or 50"></label>
+            <label><span>Sort</span><select id="builder-sort-column"><option value="">No sort</option></select></label>
+            <label><span>Direction</span><select id="builder-sort-direction"><option>ASC</option><option>DESC</option></select></label>
+            <label><span>Limit</span><input id="builder-limit" type="number" min="1" max="500" placeholder="25"></label>
+          </div>
+        </section>
+
+        <section class="results-card">
+          <div class="results-head">
+            <div>
+              <span class="eyebrow">RESULTS</span>
+              <strong id="result-summary">Ready to run</strong>
+            </div>
+            <div class="results-actions">
+              <button class="ghost-button compact" id="copy-results-button" type="button">Copy CSV</button>
+              <button class="ghost-button compact" id="add-row-button" type="button">+ Row</button>
+            </div>
+          </div>
+          <div class="result-status" id="result-status">Run a query to see data.</div>
+          <div class="table-wrap">
+            <table id="results-table"></table>
+          </div>
+        </section>
+
+        <section class="lower-grid">
+          <article class="panel">
+            <div class="panel-head"><div><span class="eyebrow">SCHEMA</span><strong id="schema-title">customers</strong></div><button id="delete-table-button" type="button" class="danger-link">Delete table</button></div>
+            <div id="schema-view" class="schema-view"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head"><div><span class="eyebrow">RELATIONSHIPS</span><strong>How the sample data connects</strong></div></div>
+            <div class="relationships" id="relationships"></div>
+          </article>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="table-dialog" class="dialog">
+    <form method="dialog" class="dialog-card" id="table-form">
+      <div class="dialog-head"><div><span class="eyebrow">NEW TABLE</span><h2>Create a table</h2></div><button value="close" class="icon-button" aria-label="Close">×</button></div>
+      <label class="field"><span>Table name</span><input id="new-table-name" required maxlength="30" placeholder="projects"></label>
+      <label class="field"><span>Columns</span><input id="new-table-columns" required placeholder="id:number, name:text, status:text"></label>
+      <p class="dialog-copy">Use comma-separated columns in the format <code>name:type</code>. Supported types: text, number, boolean, date.</p>
+      <button class="primary-button wide" id="create-table-button" type="button">Create table</button>
+    </form>
+  </dialog>
+
+  <dialog id="row-dialog" class="dialog">
+    <form method="dialog" class="dialog-card" id="row-form">
+      <div class="dialog-head"><div><span class="eyebrow">NEW ROW</span><h2 id="row-dialog-title">Add row</h2></div><button value="close" class="icon-button" aria-label="Close">×</button></div>
+      <div id="row-fields" class="row-fields"></div>
+      <button class="primary-button wide" id="save-row-button" type="button">Add row</button>
+    </form>
+  </dialog>
+
+  <dialog id="examples-dialog" class="dialog">
+    <form method="dialog" class="dialog-card wide-dialog">
+      <div class="dialog-head"><div><span class="eyebrow">QUERY EXAMPLES</span><h2>Try these</h2></div><button value="close" class="icon-button" aria-label="Close">×</button></div>
+      <div class="example-list" id="example-list"></div>
+    </form>
+  </dialog>
+
+  <dialog id="tutorial-dialog" class="dialog">
+    <form method="dialog" class="dialog-card wide-dialog">
+      <div class="dialog-head"><div><span class="eyebrow">QUICK START</span><h2>SQL in five moves</h2></div><button value="close" class="icon-button" aria-label="Close">×</button></div>
+      <div class="tutorial-grid">
+        <article><span>01</span><strong>SELECT</strong><p>Choose which columns you want to read.</p><code>SELECT name, city FROM customers;</code></article>
+        <article><span>02</span><strong>WHERE</strong><p>Filter rows using a condition.</p><code>WHERE plan = 'Pro'</code></article>
+        <article><span>03</span><strong>ORDER BY</strong><p>Sort results ascending or descending.</p><code>ORDER BY price DESC</code></article>
+        <article><span>04</span><strong>GROUP BY</strong><p>Summarize groups with COUNT, SUM, or AVG.</p><code>GROUP BY status</code></article>
+        <article><span>05</span><strong>JOIN</strong><p>Connect related tables through matching keys.</p><code>JOIN customers ON orders.customer_id = customers.id</code></article>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="index.js"></script>
 </body>
 </html>

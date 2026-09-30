@@ -1,5 +1,11 @@
 # SQL Lab
 
+<!-- repo-intro:start -->
+**Project snapshot:** SQL Lab is a browser-based SQL learning IDE with a focused execution engine, safe mutation previews, persistent workspaces, query visualization, challenges, exports, offline support, and CI.
+
+**What it demonstrates:** JavaScript · SQL parsing/execution · PWA · testing/CI · developer-tool UX.
+<!-- repo-intro:end -->
+
 ![CI](https://github.com/BTheCoderr/npmWithMySql/actions/workflows/ci.yml/badge.svg)
 
 **SQL Lab is a local-first SQL learning IDE that runs entirely in the browser.** It combines a custom SQL execution layer, safe mutation workflows, query visualization, guided practice, persistent workspaces, import/export tooling, offline support, and automated CI.

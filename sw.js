@@ -1,4 +1,4 @@
-const CACHE = 'sql-lab-v4';
+const CACHE = 'sql-lab-v5';
 const SHELL = ['./','./index.html','./styles.css','./index.js','./manifest.webmanifest','./icon.svg'];
 
 self.addEventListener('install', event => {

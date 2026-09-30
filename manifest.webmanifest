@@ -1,7 +1,7 @@
 {
   "name": "SQL Lab",
   "short_name": "SQL Lab",
-  "description": "A local-first SQL playground for learning queries, schemas, joins, filters, and aggregates.",
+  "description": "A local-first SQL learning IDE with safe transactions, query visualization, challenge tracks, persistent workspaces, and offline support.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

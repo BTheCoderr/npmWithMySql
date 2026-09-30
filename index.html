@@ -20,6 +20,8 @@
       <div class="top-actions">
         <button class="ghost-button" id="tutorial-button" type="button">Tutorial</button>
         <button class="ghost-button" id="import-button" type="button">Import</button>
+        <button class="ghost-button" id="challenge-button" type="button">Challenges</button>
+        <button class="ghost-button" id="share-workspace-button" type="button">Share</button>
         <button class="primary-button compact" id="new-table-button" type="button">+ Table</button>
       </div>
     </header>
@@ -71,6 +73,31 @@
             <span>Offline-friendly</span>
           </div>
         </div>
+
+        <section class="challenge-card" id="challenge-card">
+          <div class="challenge-head">
+            <div>
+              <span class="eyebrow">PRACTICE MODE</span>
+              <strong id="challenge-progress">0 / 6 completed</strong>
+            </div>
+            <span class="challenge-difficulty" id="challenge-difficulty">Beginner</span>
+          </div>
+          <div class="challenge-body">
+            <div class="challenge-copy">
+              <span id="challenge-number">Challenge 1 of 6</span>
+              <h2 id="challenge-title">Filter the Pro customers</h2>
+              <p id="challenge-description">Return the requested columns and rows using SQL.</p>
+              <p class="challenge-hint" id="challenge-hint" hidden></p>
+            </div>
+            <div class="challenge-controls">
+              <button class="ghost-button compact" id="previous-challenge-button" type="button">← Previous</button>
+              <button class="ghost-button compact" id="hint-button" type="button">Hint</button>
+              <button class="primary-button compact" id="load-challenge-button" type="button">Start challenge</button>
+              <button class="ghost-button compact" id="next-challenge-button" type="button">Next →</button>
+            </div>
+          </div>
+          <div class="challenge-status" id="challenge-status">Run your query and SQL Lab will check the result automatically.</div>
+        </section>
 
         <section class="editor-card">
           <div class="editor-head">
@@ -151,7 +178,7 @@
 
   <dialog id="row-dialog" class="dialog">
     <form method="dialog" class="dialog-card" id="row-form">
-      <div class="dialog-head"><div><span class="eyebrow">NEW ROW</span><h2 id="row-dialog-title">Add row</h2></div><button value="close" class="icon-button" aria-label="Close">×</button></div>
+      <div class="dialog-head"><div><span class="eyebrow">ROW EDITOR</span><h2 id="row-dialog-title">Add row</h2></div><button value="close" class="icon-button" aria-label="Close">×</button></div>
       <div id="row-fields" class="row-fields"></div>
       <button class="primary-button wide" id="save-row-button" type="button">Add row</button>
     </form>

@@ -7,7 +7,7 @@ The first version was a tiny Node/Express experiment that connected to MySQL and
 ## What you can do
 
 - Browse multiple sample tables
-- Create your own tables and add rows
+- Create your own tables and add, edit, or delete rows
 - Run SQL-style `SELECT` queries
 - Filter with `WHERE`
 - Sort with `ORDER BY`
@@ -16,10 +16,10 @@ The first version was a tiny Node/Express experiment that connected to MySQL and
 - Group results with `GROUP BY`
 - Run simple `INNER JOIN` queries
 - Build queries visually without typing SQL
-- Save queries and revisit query history
+- Save queries and revisit query history\n- Work through six built-in SQL practice challenges with automatic result checking and hints
 - Inspect table schemas and relationships
 - Import CSV data
-- Export the full workspace as JSON
+- Export the full workspace as JSON\n- Copy a self-contained share link that can reopen the same local workspace
 - Export the local database as SQL
 - Copy result sets as CSV
 - Reset to the built-in Customers / Products / Orders sample database

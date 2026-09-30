@@ -58,7 +58,9 @@
       { id:'starter-pro', name:'Pro customers', sql:"SELECT name, city, plan FROM customers WHERE plan = 'Pro' ORDER BY name ASC;" },
       { id:'starter-orders', name:'Biggest orders', sql:'SELECT id, customer_id, total, status FROM orders ORDER BY total DESC LIMIT 5;' }
     ],
-    history: []
+    history: [],
+    challengeIndex: 0,
+    challengeProgress: []
   });
 
   const normalizeState = raw => {
@@ -79,7 +81,9 @@
       tables:Object.keys(tables).length ? tables : base.tables,
       relationships:Array.isArray(raw.relationships) ? raw.relationships.slice(0,50) : base.relationships,
       savedQueries:Array.isArray(raw.savedQueries) ? raw.savedQueries.filter(Boolean).slice(0,30) : base.savedQueries,
-      history:Array.isArray(raw.history) ? raw.history.filter(Boolean).slice(0,30) : []
+      history:Array.isArray(raw.history) ? raw.history.filter(Boolean).slice(0,30) : [],
+      challengeIndex:Number.isInteger(raw.challengeIndex) ? Math.max(0, Math.min(5, raw.challengeIndex)) : 0,
+      challengeProgress:Array.isArray(raw.challengeProgress) ? [...new Set(raw.challengeProgress.filter(value => typeof value === 'string'))].slice(0,20) : []
     };
     if (!next.tables[next.activeTable]) next.activeTable = Object.keys(next.tables)[0];
     return next;
@@ -92,6 +96,7 @@
 
   let state = loadState();
   let lastResult = { columns:[], rows:[] };
+  let editingRowIndex = null;
   let toastTimer = null;
 
   const $ = id => document.getElementById(id);
@@ -105,7 +110,10 @@
     builderSortDirection:$('builder-sort-direction'), builderLimit:$('builder-limit'), importFile:$('import-file'),
     tableDialog:$('table-dialog'), newTableName:$('new-table-name'), newTableColumns:$('new-table-columns'),
     rowDialog:$('row-dialog'), rowDialogTitle:$('row-dialog-title'), rowFields:$('row-fields'),
-    examplesDialog:$('examples-dialog'), exampleList:$('example-list'), tutorialDialog:$('tutorial-dialog'), toast:$('toast')
+    examplesDialog:$('examples-dialog'), exampleList:$('example-list'), tutorialDialog:$('tutorial-dialog'), toast:$('toast'),
+    challengeCard:$('challenge-card'), challengeProgress:$('challenge-progress'), challengeDifficulty:$('challenge-difficulty'),
+    challengeNumber:$('challenge-number'), challengeTitle:$('challenge-title'), challengeDescription:$('challenge-description'),
+    challengeHint:$('challenge-hint'), challengeStatus:$('challenge-status')
   };
 
   const save = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -270,6 +278,7 @@
 
   const applyWhere = (rows, clause) => {
     if (!clause) return rows;
+    if (/\s+OR\s+/i.test(clause)) throw new Error('OR conditions are not supported yet. Use AND or split this into separate practice queries.');
     const conditions = clause.split(/\s+AND\s+/i).map(text => text.trim()).filter(Boolean);
     return rows.filter(row => conditions.every(condition => {
       const match = condition.match(/^([A-Za-z_][\w.]*?)\s*(LIKE|>=|<=|!=|=|>|<)\s*(.+)$/i);
@@ -278,9 +287,10 @@
     }));
   };
 
-  const qualifyRows = (tableName, rows) => rows.map(row => {
+  const qualifyRows = (tableName, rows) => rows.map((row, index) => {
     const record = { ...row };
-    for (const [key,value] of Object.entries(row)) record[`${tableName}.${key}`] = value;
+    Object.defineProperty(record, '__sourceIndex', { value:index, enumerable:false });
+    for (const [key,value] of Object.entries(row)) record[tableName + '.' + key] = value;
     return record;
   });
 
@@ -302,7 +312,11 @@
 
   const projectRows = (rows, expressions, groupBy) => {
     if (expressions.length === 1 && expressions[0] === '*' && !groupBy) {
-      return rows.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !key.includes('.'))));
+      return rows.map(row => {
+        const output = Object.fromEntries(Object.entries(row).filter(([key]) => !key.includes('.')));
+        Object.defineProperty(output, '__sourceIndex', { value:row.__sourceIndex, enumerable:false });
+        return output;
+      });
     }
 
     const metas = expressions.map(expressionMeta);
@@ -314,6 +328,7 @@
           const key = meta.alias || meta.raw.split('.').pop();
           output[key] = fieldValue(row, meta.raw);
         }
+        Object.defineProperty(output, '__sourceIndex', { value:row.__sourceIndex, enumerable:false });
         return output;
       });
     }
@@ -395,16 +410,19 @@
 
     if (limitMatch) projected = projected.slice(0, Math.min(500, Number(limitMatch[1])));
 
+    const hasAggregate = expressions.map(expressionMeta).some(meta => meta.aggregate);
     return {
       rows:projected,
-      columns:projected.length ? Object.keys(projected[0]) : expressions.map(expression => expressionMeta(expression).alias || expressionMeta(expression).raw.split('.').pop())
+      columns:projected.length ? Object.keys(projected[0]) : expressions.map(expression => expressionMeta(expression).alias || expressionMeta(expression).raw.split('.').pop()),
+      editable:!joinMatch && !groupMatch && !hasAggregate,
+      sourceTable:baseTable
     };
   };
 
   const renderResult = (result, durationMs=0) => {
     lastResult = result;
-    els.resultSummary.textContent = `${result.rows.length} row${result.rows.length === 1 ? '' : 's'}`;
-    els.resultStatus.textContent = `Query completed in ${durationMs} ms · ${result.columns.length} column${result.columns.length === 1 ? '' : 's'}`;
+    els.resultSummary.textContent = result.rows.length + ' row' + (result.rows.length === 1 ? '' : 's');
+    els.resultStatus.textContent = 'Query completed in ' + durationMs + ' ms · ' + result.columns.length + ' column' + (result.columns.length === 1 ? '' : 's') + (result.editable ? ' · rows editable' : '');
     els.resultStatus.className = 'result-status success';
 
     if (!result.columns.length) {
@@ -412,13 +430,133 @@
       return;
     }
 
-    els.resultsTable.innerHTML = `
-      <thead><tr>${result.columns.map(col => `<th>${escapeHtml(col)}</th>`).join('')}</tr></thead>
-      <tbody>${result.rows.map(row => `<tr>${result.columns.map(col => {
+    const actionHead = result.editable ? '<th>Actions</th>' : '';
+    const body = result.rows.map(row => {
+      const cells = result.columns.map(col => {
         const value = row[col];
-        return `<td class="${value == null ? 'null' : ''}">${value == null ? 'NULL' : escapeHtml(value)}</td>`;
-      }).join('')}</tr>`).join('')}</tbody>
-    `;
+        return '<td class="' + (value == null ? 'null' : '') + '">' + (value == null ? 'NULL' : escapeHtml(value)) + '</td>';
+      }).join('');
+      const index = row.__sourceIndex;
+      const actions = result.editable && Number.isInteger(index)
+        ? '<td class="row-actions"><button type="button" data-edit-row="' + index + '">Edit</button><button type="button" class="danger-row" data-delete-row="' + index + '">Delete</button></td>'
+        : '';
+      return '<tr>' + cells + actions + '</tr>';
+    }).join('');
+
+    els.resultsTable.innerHTML =
+      '<thead><tr>' + result.columns.map(col => '<th>' + escapeHtml(col) + '</th>').join('') + actionHead + '</tr></thead>' +
+      '<tbody>' + body + '</tbody>';
+  };
+
+  const friendlyQueryError = (error, sql) => {
+    const message = String(error?.message || 'Unable to run query.');
+    if (/does not exist/i.test(message)) return message + ' Check the Tables list on the left for the exact table name.';
+    if (/Unsupported WHERE/i.test(message)) return message + ' Try a simple condition like WHERE status = \'Delivered\'.';
+    if (/OR conditions/i.test(message)) return message;
+    if (!/\bFROM\b/i.test(sql) && /^\s*SELECT\b/i.test(sql)) return 'SQL Lab tip: SELECT queries need a FROM clause, for example SELECT * FROM customers;';
+    if (!/^\s*SELECT\b/i.test(sql)) return 'SQL Lab currently focuses on SELECT practice. Start with SELECT, then use FROM, WHERE, GROUP BY, ORDER BY, or LIMIT.';
+    return message + ' Open Examples if you want a working query to compare against.';
+  };
+
+  const challenges = [
+    {
+      id:'pro-customers', difficulty:'Beginner', title:'Filter the Pro customers',
+      description:'Return name, city, and plan for only Pro customers, sorted by name A–Z.',
+      hint:"Use WHERE plan = 'Pro' and ORDER BY name ASC.",
+      starter:'SELECT name, city, plan FROM customers;',
+      answer:"SELECT name, city, plan FROM customers WHERE plan = 'Pro' ORDER BY name ASC;"
+    },
+    {
+      id:'top-products', difficulty:'Beginner', title:'Find the three most expensive products',
+      description:'Return name and price for the top 3 products from highest price to lowest.',
+      hint:'Sort price DESC, then LIMIT the result to 3 rows.',
+      starter:'SELECT name, price FROM products;',
+      answer:'SELECT name, price FROM products ORDER BY price DESC LIMIT 3;'
+    },
+    {
+      id:'orders-by-status', difficulty:'Intermediate', title:'Count orders by status',
+      description:'Return each order status and the number of orders in that status.',
+      hint:'Use COUNT(*) with GROUP BY status.',
+      starter:'SELECT status FROM orders;',
+      answer:'SELECT status, COUNT(*) AS orders FROM orders GROUP BY status ORDER BY orders DESC;'
+    },
+    {
+      id:'average-order', difficulty:'Intermediate', title:'Calculate the average order value',
+      description:'Return one column named average_order containing the average of order totals.',
+      hint:'AVG(total) does the calculation. Add AS average_order for the column name.',
+      starter:'SELECT total FROM orders;',
+      answer:'SELECT AVG(total) AS average_order FROM orders;'
+    },
+    {
+      id:'delivered-customers', difficulty:'Advanced', title:'Join delivered orders to customers',
+      description:'Return order id, customer name, and total for delivered orders, highest total first.',
+      hint:"Join orders.customer_id to customers.id, then filter status = 'Delivered'.",
+      starter:'SELECT orders.id, customers.name, orders.total FROM orders INNER JOIN customers ON orders.customer_id = customers.id;',
+      answer:"SELECT orders.id, customers.name, orders.total FROM orders INNER JOIN customers ON orders.customer_id = customers.id WHERE orders.status = 'Delivered' ORDER BY total DESC;"
+    },
+    {
+      id:'revenue-by-product', difficulty:'Advanced', title:'Group revenue by product',
+      description:'Return product_id and total revenue for each product, highest revenue first.',
+      hint:'SUM(total) with GROUP BY product_id will produce one row per product.',
+      starter:'SELECT product_id, total FROM orders;',
+      answer:'SELECT product_id, SUM(total) AS revenue FROM orders GROUP BY product_id ORDER BY revenue DESC;'
+    }
+  ];
+
+  const comparableResult = result => JSON.stringify({
+    columns:result.columns,
+    rows:result.rows.map(row => result.columns.map(col => {
+      const value=row[col];
+      return typeof value === 'number' ? Number(value.toFixed(8)) : value;
+    }))
+  });
+
+  const renderChallenge = () => {
+    const challenge=challenges[state.challengeIndex] || challenges[0];
+    const complete=state.challengeProgress.includes(challenge.id);
+    els.challengeProgress.textContent=state.challengeProgress.length + ' / ' + challenges.length + ' completed';
+    els.challengeDifficulty.textContent=challenge.difficulty;
+    els.challengeNumber.textContent='Challenge ' + (state.challengeIndex + 1) + ' of ' + challenges.length;
+    els.challengeTitle.textContent=challenge.title;
+    els.challengeDescription.textContent=challenge.description;
+    els.challengeHint.textContent=challenge.hint;
+    els.challengeHint.hidden=true;
+    els.challengeStatus.textContent=complete
+      ? 'Completed ✓ You can rerun it or move to the next challenge.'
+      : 'Run your query and SQL Lab will check the result automatically.';
+    els.challengeStatus.className='challenge-status' + (complete ? ' passed' : '');
+  };
+
+  const evaluateChallenge = result => {
+    const challenge=challenges[state.challengeIndex] || challenges[0];
+    let expected;
+    try { expected=executeSelect(challenge.answer); } catch { return; }
+    if (comparableResult(result) === comparableResult(expected)) {
+      if (!state.challengeProgress.includes(challenge.id)) state.challengeProgress.push(challenge.id);
+      save();
+      renderChallenge();
+      els.challengeStatus.textContent='Passed ✓ That result is correct.';
+      els.challengeStatus.className='challenge-status passed';
+      toast('Challenge passed!');
+    } else {
+      els.challengeStatus.textContent='Not quite yet — your query ran, but the result does not match the challenge target.';
+      els.challengeStatus.className='challenge-status active';
+    }
+  };
+
+  const loadChallenge = () => {
+    const challenge=challenges[state.challengeIndex] || challenges[0];
+    els.queryEditor.value=challenge.starter;
+    els.challengeHint.hidden=true;
+    els.queryEditor.focus();
+    els.challengeStatus.textContent='Challenge loaded. Edit the starter query, then Run query.';
+    els.challengeStatus.className='challenge-status active';
+  };
+
+  const moveChallenge = delta => {
+    state.challengeIndex=(state.challengeIndex + delta + challenges.length) % challenges.length;
+    save();
+    renderChallenge();
   };
 
   const runQuery = () => {
@@ -429,12 +567,13 @@
       const result = executeSelect(sql);
       const duration = Math.max(0, Math.round(performance.now()-start));
       renderResult(result, duration);
+      evaluateChallenge(result);
       state.history = [{ id:`h-${Date.now()}`, sql, count:result.rows.length, at:Date.now() }, ...state.history.filter(item => item.sql !== sql)].slice(0,30);
       save();
       renderSidebar();
     } catch (error) {
       els.resultSummary.textContent = 'Query error';
-      els.resultStatus.textContent = error.message || 'Unable to run query.';
+      els.resultStatus.textContent = friendlyQueryError(error, sql);
       els.resultStatus.className = 'result-status error';
       toast('Query needs a fix.');
     }
@@ -513,18 +652,29 @@
     return value;
   };
 
-  const openRowDialog = () => {
+  const openRowDialog = (rowIndex=null) => {
     const table = state.tables[state.activeTable];
     if (!table) return toast('Choose a table first.');
-    els.rowDialogTitle.textContent = `Add row to ${state.activeTable}`;
-    els.rowFields.innerHTML = table.columns.map(col => `
-      <label>
-        <span>${escapeHtml(col.name)} · ${escapeHtml(col.type)}</span>
-        ${col.type === 'boolean'
-          ? `<select data-row-field="${escapeHtml(col.name)}" data-type="boolean"><option value="">NULL</option><option value="true">true</option><option value="false">false</option></select>`
-          : `<input data-row-field="${escapeHtml(col.name)}" data-type="${escapeHtml(col.type)}" ${col.type === 'number' ? 'type="number" step="any"' : col.type === 'date' ? 'type="date"' : 'type="text"'}>`}
-      </label>
-    `).join('');
+    editingRowIndex=Number.isInteger(rowIndex) ? rowIndex : null;
+    const current=editingRowIndex == null ? null : table.rows[editingRowIndex];
+    if (editingRowIndex != null && !current) return toast('That row no longer exists.');
+    els.rowDialogTitle.textContent = (editingRowIndex == null ? 'Add row to ' : 'Edit row in ') + state.activeTable;
+    els.rowFields.innerHTML = table.columns.map(col => {
+      const value=current?.[col.name];
+      if (col.type === 'boolean') {
+        return '<label><span>' + escapeHtml(col.name) + ' · boolean</span><select data-row-field="' + escapeHtml(col.name) + '" data-type="boolean"><option value="">NULL</option><option value="true">true</option><option value="false">false</option></select></label>';
+      }
+      const type=col.type === 'number' ? 'number' : col.type === 'date' ? 'date' : 'text';
+      const step=col.type === 'number' ? ' step="any"' : '';
+      return '<label><span>' + escapeHtml(col.name) + ' · ' + escapeHtml(col.type) + '</span><input data-row-field="' + escapeHtml(col.name) + '" data-type="' + escapeHtml(col.type) + '" type="' + type + '"' + step + ' value="' + escapeHtml(value ?? '') + '"></label>';
+    }).join('');
+    if (current) {
+      els.rowFields.querySelectorAll('[data-row-field]').forEach(input => {
+        const value=current[input.dataset.rowField];
+        input.value=value == null ? '' : String(value);
+      });
+    }
+    $('save-row-button').textContent=editingRowIndex == null ? 'Add row' : 'Save changes';
     els.rowDialog.showModal();
   };
 
@@ -535,12 +685,26 @@
     els.rowFields.querySelectorAll('[data-row-field]').forEach(input => {
       row[input.dataset.rowField] = coerceByType(input.value, input.dataset.type);
     });
-    table.rows.push(row);
+    if (editingRowIndex == null) table.rows.push(row);
+    else if (table.rows[editingRowIndex]) table.rows[editingRowIndex]=row;
+    const edited=editingRowIndex != null;
+    editingRowIndex=null;
     save();
     els.rowDialog.close();
     renderAll();
     runQuery();
-    toast('Row added.');
+    toast(edited ? 'Row updated.' : 'Row added.');
+  };
+
+  const deleteRow = rowIndex => {
+    const table=state.tables[state.activeTable];
+    if (!table || !table.rows[rowIndex]) return toast('That row no longer exists.');
+    if (!confirm('Delete this row from ' + state.activeTable + '?')) return;
+    table.rows.splice(rowIndex,1);
+    save();
+    renderAll();
+    runQuery();
+    toast('Row deleted.');
   };
 
   const deleteActiveTable = () => {
@@ -661,6 +825,53 @@
     finally { els.importFile.value=''; }
   };
 
+  const encodeWorkspace = value => {
+    const bytes=new TextEncoder().encode(JSON.stringify(value));
+    let binary='';
+    for (let i=0;i<bytes.length;i+=8192) binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+    return btoa(binary).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
+  };
+
+  const decodeWorkspace = value => {
+    let base=value.replaceAll('-','+').replaceAll('_','/');
+    while (base.length % 4) base+='=';
+    const binary=atob(base);
+    const bytes=Uint8Array.from(binary, char => char.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  };
+
+  const shareWorkspace = async () => {
+    const payload={...state, history:[]};
+    const encoded=encodeWorkspace(payload);
+    const base=location.href.split('#')[0];
+    const url=base + '#workspace=' + encoded;
+    if (url.length > 12000) {
+      exportJSON();
+      return toast('Workspace is too large for a share link, so a JSON backup was downloaded instead.');
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      toast('Share link copied.');
+    } catch {
+      prompt('Copy this SQL Lab workspace link:', url);
+    }
+  };
+
+  const importSharedWorkspace = () => {
+    const raw=location.hash.startsWith('#workspace=') ? location.hash.slice(11) : '';
+    if (!raw) return false;
+    try {
+      state=normalizeState(decodeWorkspace(raw));
+      save();
+      if (history.replaceState) history.replaceState(null,'',location.pathname + location.search);
+      toast('Shared workspace loaded.');
+      return true;
+    } catch {
+      toast('That workspace link could not be loaded.');
+      return false;
+    }
+  };
+
   const examples = [
     ['Filter rows',"SELECT name, city, plan FROM customers WHERE plan = 'Pro' ORDER BY name ASC;"],
     ['Top orders','SELECT id, customer_id, total, status FROM orders ORDER BY total DESC LIMIT 5;'],
@@ -705,8 +916,14 @@
   $('apply-builder-button').addEventListener('click', applyBuilder);
   $('new-table-button').addEventListener('click', () => els.tableDialog.showModal());
   $('create-table-button').addEventListener('click', createTable);
-  $('add-row-button').addEventListener('click', openRowDialog);
+  $('add-row-button').addEventListener('click', () => openRowDialog());
   $('save-row-button').addEventListener('click', saveRow);
+  els.resultsTable.addEventListener('click', event => {
+    const edit=event.target.closest('[data-edit-row]');
+    if (edit) return openRowDialog(Number(edit.dataset.editRow));
+    const remove=event.target.closest('[data-delete-row]');
+    if (remove) deleteRow(Number(remove.dataset.deleteRow));
+  });
   $('delete-table-button').addEventListener('click', deleteActiveTable);
   $('save-current-query-button').addEventListener('click', saveCurrentQuery);
   $('clear-history-button').addEventListener('click', () => { state.history=[]; save(); renderSidebar(); });
@@ -726,6 +943,12 @@
   els.importFile.addEventListener('change', () => importFile(els.importFile.files?.[0]));
   $('examples-button').addEventListener('click', () => els.examplesDialog.showModal());
   $('tutorial-button').addEventListener('click', () => els.tutorialDialog.showModal());
+  $('challenge-button').addEventListener('click', () => els.challengeCard.scrollIntoView({behavior:'smooth',block:'center'}));
+  $('share-workspace-button').addEventListener('click', shareWorkspace);
+  $('load-challenge-button').addEventListener('click', loadChallenge);
+  $('previous-challenge-button').addEventListener('click', () => moveChallenge(-1));
+  $('next-challenge-button').addEventListener('click', () => moveChallenge(1));
+  $('hint-button').addEventListener('click', () => { els.challengeHint.hidden=!els.challengeHint.hidden; });
   $('brand-button').addEventListener('click', () => { state.activeTable=Object.keys(state.tables)[0] || ''; save(); renderAll(); });
 
   els.exampleList.addEventListener('click', event => {
@@ -750,8 +973,10 @@
     }
   });
 
+  importSharedWorkspace();
   renderExamples();
   renderAll();
+  renderChallenge();
   runQuery();
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {

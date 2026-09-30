@@ -1,17 +1,11 @@
 {
-  "name": "mysql",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "sql-lab-local",
+  "version": "2.0.0",
+  "private": true,
+  "description": "A local-first SQL playground for practicing queries, schemas, joins, filters, aggregates, and data import/export in the browser.",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "npx serve .",
+    "check": "node --check index.js"
   },
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "body-parser": "^1.20.2",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "mysql": "^2.18.1"
-  }
+  "license": "MIT"
 }
